@@ -1,0 +1,71 @@
+{
+  "_comment": "07 §2.1 Phase A 문항 풀. 총 50문항(QLI 25 + MTI 25). 명세 공백: 실제 문항 내용은 10_PBL_과제설계 연구팀 산출물. 현재 QLI 5 + MTI 5 = 10개 작동 샘플. 나머지 40개는 TODO.",
+  "version": "q_f1.0",
+  "total_target": 50,
+  "total_active": 10,
+  "selection_rule": "각 축 5문항 무작위 균형 추출 (난이도·하위영역 균형, 07 §2.1)",
+  "response_scale": { "min": 1, "max": 4, "labels": ["전혀 그렇지 않다", "그렇지 않다", "그렇다", "매우 그렇다"] },
+  "items": [
+    {
+      "item_id": "QLI_001", "axis": "qli", "reverse": false, "active": true,
+      "sub_domain": "lp",
+      "text": "AI와 대화할 때, 표면적인 답보다 그 답의 근거나 원인을 더 깊이 파고드는 질문을 자주 한다.",
+      "difficulty": "mid"
+    },
+    {
+      "item_id": "QLI_002", "axis": "qli", "reverse": false, "active": true,
+      "sub_domain": "bf",
+      "text": "하나의 질문에 답을 받으면, 곧바로 새로운 관련 질문이 자연스럽게 떠오른다.",
+      "difficulty": "mid"
+    },
+    {
+      "item_id": "QLI_003", "axis": "qli", "reverse": true, "active": true,
+      "sub_domain": "ae",
+      "text": "질문을 만들 때, 내 질문 속에 어떤 전제가 깔려 있는지 잘 생각하지 않는다.",
+      "difficulty": "mid"
+    },
+    {
+      "item_id": "QLI_004", "axis": "qli", "reverse": false, "active": true,
+      "sub_domain": "lp",
+      "text": "어떤 현상을 이해할 때, '왜 그런가'를 반복적으로 물으며 더 근본적인 이유를 찾으려 한다.",
+      "difficulty": "high"
+    },
+    {
+      "item_id": "QLI_005", "axis": "qli", "reverse": false, "active": true,
+      "sub_domain": "bf",
+      "text": "대화 중 한 주제가 끝나기 전에 여러 방향으로 탐색을 확장하려는 경향이 있다.",
+      "difficulty": "high"
+    },
+    {
+      "item_id": "MTI_001", "axis": "mti", "reverse": false, "active": true,
+      "sub_domain": "monitoring",
+      "text": "AI가 설명한 내용이 내 기존 생각과 다를 때, 무엇이 틀렸는지 스스로 점검한다.",
+      "difficulty": "mid"
+    },
+    {
+      "item_id": "MTI_002", "axis": "mti", "reverse": true, "active": true,
+      "sub_domain": "regulation",
+      "text": "AI와 대화하다 막히면, 같은 방식을 계속 반복하는 편이다.",
+      "difficulty": "mid"
+    },
+    {
+      "item_id": "MTI_003", "axis": "mti", "reverse": false, "active": true,
+      "sub_domain": "monitoring",
+      "text": "내 이전 발언이 틀렸다는 것을 깨달으면, 즉시 수정하고 이유를 설명한다.",
+      "difficulty": "high"
+    },
+    {
+      "item_id": "MTI_004", "axis": "mti", "reverse": false, "active": true,
+      "sub_domain": "regulation",
+      "text": "문제가 잘 풀리지 않으면, 접근 방식 자체를 바꿔보려는 시도를 한다.",
+      "difficulty": "mid"
+    },
+    {
+      "item_id": "MTI_005", "axis": "mti", "reverse": false, "active": true,
+      "sub_domain": "monitoring",
+      "text": "대화 중에 '내가 이 개념을 제대로 이해하고 있는가'를 스스로 점검하는 편이다.",
+      "difficulty": "mid"
+    }
+  ],
+  "_todo": "나머지 40개(QLI 20 + MTI 20) 문항은 연구팀이 10_PBL_과제설계_v_f1 기반으로 작성 후 추가. 각 문항은 파일럿 검증(변별도 분석) 통과 후 active:true 전환(07 §2.1)."
+}

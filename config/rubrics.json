@@ -1,0 +1,26 @@
+{
+  "_comment": "02_루브릭_v_f1 운영 파생물. 변경 시 rubric_version minor 증가(06 §10).",
+  "rubric_version": "v_f1",
+  "institution": {
+    "id": "BNU",
+    "defaults": {
+      "weights_class": { "W_S": 4, "W_A": 3, "W_B": 2, "W_C": 1 },
+      "mti_layer_weights": { "L1": 0.60, "L2": 0.25, "L3": 0.15 },
+      "ensemble_n": 3,
+      "ensemble_std_threshold": 1.5,
+      "divergence_threshold": 2.0,
+      "low_data_min_turns": 5,
+      "tau_k_default": 2.0,
+      "session_timeout_min": 15,
+      "session_max_min": 90,
+      "l1_sigmoid_k": 0.6,
+      "l1_sigmoid_midpoint": 1.5,
+      "disengagement_min_conditions": 2,
+      "abs_band_thresholds": {
+        "_comment": "C안 메모: 파라미터 계층에 위임 시 이 키를 dept/prof 오버라이드로 확장. 현재 A안 고정값.",
+        "high": 7.0,
+        "low": 4.0
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "_comment": "04 §3 파라미터 계층. resolve_params()가 키 단위 머지. 명시된 키만 교체.",
+  "institution": {
+    "id": "BNU",
+    "defaults": {}
+  },
+  "departments": [
+    {
+      "id": "history",
+      "overrides": {
+        "mti_layer_weights": { "L1": 0.55, "L2": 0.30, "L3": 0.15 }
+      },
+      "tau_baseline_seed": {
+        "MTI": 1.2, "QLI": 1.0, "Rec": 0.8, "Recon": 1.1, "Orc": 0.9
+      }
+    },
+    {
+      "id": "science",
+      "overrides": {},
+      "tau_baseline_seed": {
+        "MTI": 1.0, "QLI": 1.2, "Rec": 0.9, "Recon": 1.0, "Orc": 1.0
+      }
+    },
+    {
+      "id": "engineering",
+      "overrides": {},
+      "tau_baseline_seed": {
+        "MTI": 0.9, "QLI": 1.0, "Rec": 0.8, "Recon": 0.9, "Orc": 1.1
+      }
+    }
+  ],
+  "professors": [
+    {
+      "id": "P01",
+      "smart_weights": {
+        "originality": 0.3, "logical_consistency": 0.4, "evidence_quality": 0.3
+      },
+      "tau_k_override": 2.2
+    }
+  ]
+}

@@ -6,6 +6,7 @@ adapter/repository 계층이다. 기존 courses 테이블과 병행해 course_ro
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Optional
 
@@ -26,6 +27,15 @@ CREATE TABLE IF NOT EXISTS course_routes (
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     UNIQUE(college_code, department_code, subject_code)
+);
+
+CREATE TABLE IF NOT EXISTS course_task_routes (
+    course_id   TEXT NOT NULL REFERENCES course_routes(course_id),
+    task_id     TEXT NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    PRIMARY KEY (course_id, task_id)
 );
 """
 
@@ -53,6 +63,15 @@ def seed_default_if_empty(conn: sqlite3.Connection) -> None:
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
+
+
+def _task_row_to_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["questions"] = json.loads(d.pop("questions_json") or "[]")
+    d["advanced_questions"] = json.loads(d.pop("advanced_json") or "[]")
+    d["target_metrics"] = json.loads(d.get("target_metrics") or "[]")
+    d["trigger_design"] = json.loads(d.get("trigger_design") or "[]")
+    return d
 
 
 def upsert_course_route(conn: sqlite3.Connection, route: dict) -> str:
@@ -153,3 +172,42 @@ def list_courses(conn: sqlite3.Connection, college_code: str, department_code: s
         (normalize_college_code(college_code), normalize_department_code(department_code)),
     ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+def set_course_task_route(conn: sqlite3.Connection, course_id: str, task_id: str, active: bool = True) -> None:
+    conn.execute(
+        """
+        INSERT INTO course_task_routes(course_id, task_id, active, updated_at)
+        VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        ON CONFLICT(course_id, task_id) DO UPDATE SET
+            active=excluded.active,
+            updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+        """,
+        (course_id, task_id, 1 if active else 0),
+    )
+    conn.commit()
+
+
+def list_course_task_routes(conn: sqlite3.Connection, course_id: str | None = None) -> list[dict]:
+    if course_id:
+        rows = conn.execute(
+            "SELECT * FROM course_task_routes WHERE course_id=? ORDER BY active DESC, task_id",
+            (course_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM course_task_routes ORDER BY course_id, active DESC, task_id").fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_active_pbl_tasks_for_course(conn: sqlite3.Connection, course_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT p.*
+        FROM pbl_tasks p
+        JOIN course_task_routes r ON r.task_id = p.task_id
+        WHERE r.course_id=? AND r.active=1 AND p.active=1
+        ORDER BY p.task_id
+        """,
+        (course_id,),
+    ).fetchall()
+    return [_task_row_to_dict(r) for r in rows]

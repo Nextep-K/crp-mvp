@@ -54,6 +54,14 @@ def render_admin(conn, prof_id: str, course_id: str) -> None:
     st.caption("v0.5.1 - 과목 라우팅 블록")
     st.info("Phase A 객관식 문항 풀은 공통 유지됩니다. Phase B PBL 과제만 course_id별로 연결됩니다.")
 
+    tab_course, tab_task = st.tabs(["과목 코드 관리", "과목별 PBL 연결"])
+    with tab_course:
+        _render_course_routes(conn)
+    with tab_task:
+        _render_course_task_routes(conn)
+
+
+def _render_course_routes(conn) -> None:
     routes = repository.list_course_routes(conn, active_only=False)
     st.markdown("### 과목 라우팅 목록")
     if routes:
@@ -116,3 +124,41 @@ def render_admin(conn, prof_id: str, course_id: str) -> None:
                 repository.set_course_route_active(conn, selected_id, True)
                 st.success("과목이 활성화되었습니다.")
                 st.rerun()
+
+
+def _render_course_task_routes(conn) -> None:
+    st.markdown("### 과목별 Phase B PBL 과제 연결")
+    courses = repository.list_course_routes(conn, active_only=False)
+    tasks = _get_all_pbl_tasks(conn)
+    if not courses:
+        st.info("먼저 과목을 등록하세요.")
+        return
+    if not tasks:
+        st.info("먼저 문항 관리 화면에서 Phase B PBL 과제를 등록하세요.")
+        return
+
+    course_options = {f"{c['course_id']} - {c['course_name']}": c for c in courses}
+    task_options = {f"{t['task_id']} - {t['title']}": t for t in tasks}
+    selected_course_label = st.selectbox("과목", list(course_options.keys()), key="v051_task_route_course")
+    selected_task_label = st.selectbox("연결할 PBL 과제", list(task_options.keys()), key="v051_task_route_task")
+    active = st.checkbox("이 과목에서 이 과제 사용", value=True, key="v051_task_route_active")
+
+    if st.button("과제 연결 저장", type="primary"):
+        course = course_options[selected_course_label]
+        task = task_options[selected_task_label]
+        repository.set_course_task_route(conn, course["course_id"], task["task_id"], active=active)
+        st.success("과목별 PBL 과제 연결이 저장되었습니다.")
+        st.rerun()
+
+    routes = repository.list_course_task_routes(conn)
+    if routes:
+        st.markdown("### 연결 목록")
+        st.dataframe(pd.DataFrame(routes), use_container_width=True, hide_index=True)
+
+
+def _get_all_pbl_tasks(conn) -> list[dict]:
+    try:
+        import db
+        return db.get_all_pbl_tasks(conn)
+    except Exception:
+        return []

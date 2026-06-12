@@ -145,12 +145,11 @@ def main():
         else:
             st.divider()
             st.caption("교수/관리자 화면")
-            admin_view = st.radio(
+            st.radio(
                 "관리 메뉴",
                 ["측정 현황", "과목 관리", "문항 관리"],
                 key="admin_view",
             )
-            st.session_state["admin_view"] = admin_view
 
     if role == "student":
         from pages._student_flow import render

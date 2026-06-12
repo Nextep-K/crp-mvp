@@ -9,6 +9,7 @@ app.py — CRP MVP 메인 진입점 (09 §2)
 - 학생 UX는 연속 수행으로 보이게 한다.
 - 측정 엔진과 저장소는 Phase A / Phase B를 분리한다.
 - 엔진 함수는 st.session_state를 직접 읽지 않는다.
+- v0.5.1부터 과목 라우팅은 features/course_routing 블록으로 분리한다.
 """
 from __future__ import annotations
 
@@ -24,7 +25,9 @@ sys.path.insert(0, os.path.join(BASE_DIR, "engines", "phase_b_engine"))
 sys.path.insert(0, os.path.join(BASE_DIR, "storage"))
 
 import db
-from auth import get_student_access_code, privacy_notice, validate_student_access_code
+from auth import privacy_notice
+from features.course_routing import service as course_routing_service
+from features.course_routing.ui import render_student_selector
 
 st.set_page_config(page_title="CRP 인지 재구성 프로토콜", layout="wide")
 
@@ -35,6 +38,7 @@ def get_db():
     db.init_schema(conn)
     db.init_question_pool_if_empty(conn, os.path.join(BASE_DIR, "config", "question_pool.json"))
     db.init_pbl_tasks_if_empty(conn, os.path.join(BASE_DIR, "config", "pbl_tasks.json"))
+    course_routing_service.init_course_routing(conn)
     return conn
 
 
@@ -49,6 +53,7 @@ def _clear_flow_state() -> None:
         "chat_messages",
         "current_q",
         "session_ended",
+        "current_task_snapshot",
     ]:
         st.session_state.pop(key, None)
 
@@ -73,7 +78,7 @@ def login_page():
                     {
                         "role": "professor",
                         "user_id": user_id,
-                        "course_id": "c_default",
+                        "course_id": "admin",
                         "logged_in": True,
                     }
                 )
@@ -82,25 +87,29 @@ def login_page():
                 st.error("비밀번호가 올바르지 않습니다. PROF_PASSWORD가 설정되어 있는지 확인하세요.")
     else:
         st.info(privacy_notice())
-        course_id = st.text_input("과목 코드", value="c_default")
-        access_code = st.text_input("참여 코드", type="password")
+        conn = get_db()
+        selected_course = render_student_selector(conn)
         if st.button("로그인", type="primary"):
-            correct_code = get_student_access_code(st.secrets, os.environ)
-
-            if not user_id or not course_id or not access_code:
-                st.error("사용자 ID, 과목 코드, 참여 코드를 모두 입력하세요.")
-            elif not validate_student_access_code(access_code, correct_code):
-                st.error("참여 코드가 올바르지 않습니다.")
+            if not user_id:
+                st.error("사용자 ID를 입력하세요.")
+            elif not selected_course:
+                st.error("과목을 선택하세요.")
             else:
-                conn = get_db()
+                course_id = selected_course["course_id"]
                 db.upsert_student(conn, user_id)
-                db.upsert_course(conn, course_id)
+                db.upsert_course(
+                    conn,
+                    course_id,
+                    name=selected_course.get("course_name", ""),
+                    dept=selected_course.get("department_name", ""),
+                )
                 _clear_flow_state()
                 st.session_state.update(
                     {
                         "role": "student",
                         "user_id": user_id,
                         "course_id": course_id,
+                        "course_label": selected_course.get("course_name", course_id),
                         "logged_in": True,
                         "student_flow_view": "activity",
                     }
@@ -138,7 +147,7 @@ def main():
             st.caption("교수/관리자 화면")
             admin_view = st.radio(
                 "관리 메뉴",
-                ["측정 현황", "문항 관리"],
+                ["측정 현황", "과목 관리", "문항 관리"],
                 key="admin_view",
             )
             st.session_state["admin_view"] = admin_view
@@ -147,7 +156,9 @@ def main():
         from pages._student_flow import render
         render(conn, st.session_state["user_id"], st.session_state["course_id"])
     else:
-        if st.session_state.get("admin_view") == "문항 관리":
+        if st.session_state.get("admin_view") == "과목 관리":
+            from features.course_routing.ui import render_admin as render
+        elif st.session_state.get("admin_view") == "문항 관리":
             from pages._question_pool import render
         else:
             from pages._dashboard import render

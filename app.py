@@ -159,7 +159,7 @@ def main():
         if st.session_state.get("admin_view") == "과목 관리":
             from features.course_routing.ui import render_admin as render
         elif st.session_state.get("admin_view") == "평가 콘텐츠 관리":
-            from features.admin_content.ui import render
+            from features.admin_content import render
         else:
             from pages._dashboard import render
         render(conn, st.session_state["user_id"], st.session_state["course_id"])

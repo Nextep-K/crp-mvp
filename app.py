@@ -10,7 +10,7 @@ app.py — CRP MVP 메인 진입점 (09 §2)
 - 측정 엔진과 저장소는 Phase A / Phase B를 분리한다.
 - 엔진 함수는 st.session_state를 직접 읽지 않는다.
 - v0.5.1부터 과목 라우팅은 features/course_routing 블록으로 분리한다.
-- v0.5.2부터 평가 콘텐츠 관리는 features/admin_content 블록으로 분리한다.
+- v0.5.3부터 교수 관리자 메뉴는 Phase A 관리 / Phase B 관리로 직접 분리한다.
 """
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def main():
             st.caption("교수/관리자 화면")
             st.radio(
                 "관리 메뉴",
-                ["측정 현황", "과목 관리", "평가 콘텐츠 관리"],
+                ["측정 현황", "과목 관리", "Phase A 관리", "Phase B 관리"],
                 key="admin_view",
             )
 
@@ -158,8 +158,10 @@ def main():
     else:
         if st.session_state.get("admin_view") == "과목 관리":
             from features.course_routing.ui import render_admin as render
-        elif st.session_state.get("admin_view") == "평가 콘텐츠 관리":
-            from features.admin_content.ui import render
+        elif st.session_state.get("admin_view") == "Phase A 관리":
+            from features.admin_content.ui import render_phase_a_admin as render
+        elif st.session_state.get("admin_view") == "Phase B 관리":
+            from features.admin_content.ui import render_phase_b_admin as render
         else:
             from pages._dashboard import render
         render(conn, st.session_state["user_id"], st.session_state["course_id"])

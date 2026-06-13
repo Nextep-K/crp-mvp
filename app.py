@@ -59,6 +59,44 @@ def _clear_flow_state() -> None:
         st.session_state.pop(key, None)
 
 
+def _admin_phase_a_fallback(conn, prof_id: str, course_id: str) -> None:
+    """Fallback screen if the v0.5.3 admin-content block import fails during deployment."""
+    st.title("Phase A 관리")
+    st.warning("Phase A 미리보기 모듈을 불러오지 못해 기존 객관식 문항 관리 도구를 표시합니다.")
+    from pages._question_pool import _render_phase_a
+
+    _render_phase_a(conn, prof_id)
+
+
+def _admin_phase_b_fallback(conn, prof_id: str, course_id: str) -> None:
+    """Fallback screen if the v0.5.3 admin-content block import fails during deployment."""
+    st.title("Phase B 관리")
+    st.warning("Phase B 미리보기 모듈을 불러오지 못해 기존 PBL 과제 관리 도구를 표시합니다.")
+    from pages._question_pool import _render_phase_b
+
+    _render_phase_b(conn, prof_id)
+
+
+def _load_admin_content_renderer(view: str):
+    """Load Phase A/B admin renderer with a defensive fallback for transient deploy imports."""
+    try:
+        if view == "Phase A 관리":
+            from features.admin_content.ui import render_phase_a_admin
+
+            return render_phase_a_admin
+        if view == "Phase B 관리":
+            from features.admin_content.ui import render_phase_b_admin
+
+            return render_phase_b_admin
+    except Exception as exc:  # pragma: no cover - deployment safety guard
+        st.error("관리 화면 모듈을 불러오는 중 오류가 발생했습니다. 임시 기본 관리 화면으로 전환합니다.")
+        st.caption(f"오류 유형: {type(exc).__name__}")
+        if view == "Phase A 관리":
+            return _admin_phase_a_fallback
+        return _admin_phase_b_fallback
+    raise ValueError(f"Unknown admin content view: {view}")
+
+
 def login_page():
     st.title("CRP 시스템")
     st.subheader("로그인")
@@ -156,12 +194,11 @@ def main():
         from pages._student_flow import render
         render(conn, st.session_state["user_id"], st.session_state["course_id"])
     else:
-        if st.session_state.get("admin_view") == "과목 관리":
+        admin_view = st.session_state.get("admin_view")
+        if admin_view == "과목 관리":
             from features.course_routing.ui import render_admin as render
-        elif st.session_state.get("admin_view") == "Phase A 관리":
-            from features.admin_content.ui import render_phase_a_admin as render
-        elif st.session_state.get("admin_view") == "Phase B 관리":
-            from features.admin_content.ui import render_phase_b_admin as render
+        elif admin_view in {"Phase A 관리", "Phase B 관리"}:
+            render = _load_admin_content_renderer(admin_view)
         else:
             from pages._dashboard import render
         render(conn, st.session_state["user_id"], st.session_state["course_id"])

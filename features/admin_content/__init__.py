@@ -1,1 +1,1 @@
-"""Admin content management feature block."""
+"""Admin evaluation-content management feature block."""

@@ -49,16 +49,129 @@ def render_student_selector(conn) -> dict | None:
 
 
 def render_admin(conn, prof_id: str, course_id: str) -> None:
+    """Render simplified course management screen for university demo."""
     service.init_course_routing(conn)
     st.title("과목 관리")
-    st.caption("v0.5.1 - 과목 라우팅 블록")
-    st.info("Phase A 객관식 문항 풀은 공통 유지됩니다. Phase B PBL 과제만 course_id별로 연결됩니다.")
+    st.caption("대학 시연용 MVP 화면: 과목 현황을 먼저 확인하고, 수정 기능은 고급 설정에 둡니다.")
+    st.info("Phase A 객관식 문항 풀은 전 과목 공통입니다. 과목별로는 Phase B PBL 과제만 연결됩니다.")
 
-    tab_course, tab_task = st.tabs(["과목 코드 관리", "과목별 PBL 연결"])
-    with tab_course:
+    routes = repository.list_course_routes(conn, active_only=False)
+    task_routes = repository.list_course_task_routes(conn)
+    tasks = _get_all_pbl_tasks(conn)
+
+    _render_course_overview(routes, task_routes)
+    _render_course_summary_table(routes, task_routes, tasks)
+    _render_demo_course_preview(routes, task_routes, tasks, course_id)
+
+    st.divider()
+    with st.expander("고급 설정: 과목 추가 / 수정 / 활성화", expanded=False):
+        st.caption("시연 중에는 보통 사용하지 않습니다. 과목 코드를 추가하거나 노출 상태를 바꿀 때만 펼쳐서 사용합니다.")
         _render_course_routes(conn)
-    with tab_task:
+
+    with st.expander("고급 설정: 과목별 Phase B PBL 과제 연결", expanded=False):
+        st.caption("특정 과목에 별도 PBL 과제를 연결할 때만 사용합니다. 연결된 과제가 없으면 공통 활성 PBL 과제가 사용됩니다.")
         _render_course_task_routes(conn)
+
+
+def _render_course_overview(routes: list[dict], task_routes: list[dict]) -> None:
+    st.markdown("### 현재 등록된 과목 현황")
+    active_routes = [r for r in routes if r.get("active")]
+    active_task_course_ids = {
+        r.get("course_id") for r in task_routes if r.get("active")
+    }
+    active_connected = [r for r in active_routes if r.get("course_id") in active_task_course_ids]
+    active_unconnected = [r for r in active_routes if r.get("course_id") not in active_task_course_ids]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("등록 과목", len(routes))
+    c2.metric("활성 과목", len(active_routes))
+    c3.metric("PBL 연결 과목", len(active_connected))
+    c4.metric("미연결 활성 과목", len(active_unconnected))
+
+    st.caption(
+        "미연결 활성 과목은 과목 전용 PBL 과제가 없다는 뜻입니다. 이 경우 학생 화면에서는 공통 활성 PBL 과제가 사용됩니다."
+    )
+
+
+def _render_course_summary_table(routes: list[dict], task_routes: list[dict], tasks: list[dict]) -> None:
+    st.markdown("### 과목 목록 요약")
+    if not routes:
+        st.info("등록된 과목이 없습니다.")
+        return
+
+    task_map = {str(t.get("task_id")): t for t in tasks}
+    active_task_ids_by_course: dict[str, list[str]] = {}
+    for route in task_routes:
+        if not route.get("active"):
+            continue
+        active_task_ids_by_course.setdefault(route.get("course_id"), []).append(str(route.get("task_id")))
+
+    rows = []
+    for r in routes:
+        task_ids = active_task_ids_by_course.get(r["course_id"], [])
+        task_titles = [task_map.get(tid, {}).get("title") or tid for tid in task_ids]
+        rows.append({
+            "과목 ID": r["course_id"],
+            "단과대학": f"{r['college_code']}. {r['college_name']}",
+            "학과": f"{r['department_code']}. {r['department_name']}",
+            "과목명": r["course_name"],
+            "담당": r.get("professor_name") or "-",
+            "Phase B 과제": ", ".join(task_titles) if task_titles else "공통 과제 사용",
+            "상태": "활성" if r.get("active") else "비활성",
+        })
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_demo_course_preview(
+    routes: list[dict],
+    task_routes: list[dict],
+    tasks: list[dict],
+    current_course_id: str,
+) -> None:
+    st.markdown("### 현재 시연 과목 확인")
+    if not routes:
+        st.info("등록된 과목이 없어 시연 과목을 표시할 수 없습니다.")
+        return
+
+    active_routes = [r for r in routes if r.get("active")]
+    selectable_routes = active_routes or routes
+    default_index = 0
+    for idx, route in enumerate(selectable_routes):
+        if route.get("course_id") == current_course_id:
+            default_index = idx
+            break
+
+    labels = [f"{r['course_id']} / {r['course_name']}" for r in selectable_routes]
+    selected_label = st.selectbox("시연 기준 과목", labels, index=default_index, key="course_demo_preview")
+    selected_route = selectable_routes[labels.index(selected_label)]
+
+    st.write(f"**학생 선택 화면 기준 과목:** {selected_route['course_id']} — {selected_route['course_name']}")
+    st.caption(
+        f"{selected_route['college_name']} / {selected_route['department_name']} · 담당: {selected_route.get('professor_name') or '-'}"
+    )
+
+    connected_task_ids = [
+        str(r.get("task_id"))
+        for r in task_routes
+        if r.get("course_id") == selected_route["course_id"] and r.get("active")
+    ]
+    task_map = {str(t.get("task_id")): t for t in tasks}
+    connected_tasks = [task_map[tid] for tid in connected_task_ids if tid in task_map]
+
+    if connected_tasks:
+        st.success("이 과목에는 전용 Phase B PBL 과제가 연결되어 있습니다.")
+        for task in connected_tasks[:3]:
+            st.markdown(f"- **{task.get('title') or task.get('task_id')}**")
+    else:
+        fallback_tasks = [t for t in tasks if t.get("active", True)]
+        st.warning("이 과목에는 전용 PBL 과제가 없습니다. 학생 화면에서는 공통 활성 PBL 과제가 사용됩니다.")
+        if fallback_tasks:
+            st.markdown("**공통 fallback 후보**")
+            for task in fallback_tasks[:3]:
+                st.markdown(f"- {task.get('title') or task.get('task_id')}")
+        else:
+            st.info("현재 사용할 수 있는 공통 PBL 과제도 없습니다. Phase B 관리에서 시연용 과제를 확인하세요.")
 
 
 def _render_course_routes(conn) -> None:

@@ -11,16 +11,37 @@ def _course_label(route: dict) -> str:
     return f"{route['subject_code']} - {route['course_name']}"
 
 
+def _index_by_course_id(routes: list[dict], course_id: str | None, *, fallback: int = 0) -> int:
+    if not course_id:
+        return fallback
+    for idx, route in enumerate(routes):
+        if route.get("course_id") == course_id:
+            return idx
+    return fallback
+
+
+def _index_by_value(items: list[dict], key: str, value: str | None, *, fallback: int = 0) -> int:
+    if not value:
+        return fallback
+    for idx, item in enumerate(items):
+        if item.get(key) == value:
+            return idx
+    return fallback
+
+
 def render_student_selector(conn) -> dict | None:
     """Render student course selector and return selected route."""
     service.init_course_routing(conn)
+    default_course = service.get_default_course(conn)
+
     colleges = repository.list_colleges(conn)
     if not colleges:
         st.error("활성화된 과목이 없습니다. 관리자에게 문의하세요.")
         return None
 
     college_labels = [f"{c['college_code']}. {c['college_name']}" for c in colleges]
-    selected_college_label = st.selectbox("단과대학 선택", college_labels)
+    college_index = _index_by_value(colleges, "college_code", (default_course or {}).get("college_code"))
+    selected_college_label = st.selectbox("단과대학 선택", college_labels, index=college_index)
     selected_college = colleges[college_labels.index(selected_college_label)]
 
     departments = repository.list_departments(conn, selected_college["college_code"])
@@ -28,8 +49,13 @@ def render_student_selector(conn) -> dict | None:
         st.error("선택한 단과대학에 활성화된 학과가 없습니다.")
         return None
 
+    default_department_code = None
+    if default_course and default_course.get("college_code") == selected_college.get("college_code"):
+        default_department_code = default_course.get("department_code")
+
     department_labels = [f"{d['department_code']}. {d['department_name']}" for d in departments]
-    selected_department_label = st.selectbox("학과 선택", department_labels)
+    department_index = _index_by_value(departments, "department_code", default_department_code)
+    selected_department_label = st.selectbox("학과 선택", department_labels, index=department_index)
     selected_department = departments[department_labels.index(selected_department_label)]
 
     courses = repository.list_courses(
@@ -41,8 +67,13 @@ def render_student_selector(conn) -> dict | None:
         st.error("선택한 학과에 활성화된 과목이 없습니다.")
         return None
 
+    default_course_id = None
+    if default_course and default_course.get("department_code") == selected_department.get("department_code"):
+        default_course_id = default_course.get("course_id")
+
     course_labels = [_course_label(c) for c in courses]
-    selected_course_label = st.selectbox("과목 선택", course_labels)
+    course_index = _index_by_course_id(courses, default_course_id)
+    selected_course_label = st.selectbox("과목 선택", course_labels, index=course_index)
     selected_course = courses[course_labels.index(selected_course_label)]
     st.caption(f"선택 과목 코드: {selected_course['course_id']}")
     return selected_course
@@ -136,11 +167,9 @@ def _render_demo_course_preview(
 
     active_routes = [r for r in routes if r.get("active")]
     selectable_routes = active_routes or routes
-    default_index = 0
-    for idx, route in enumerate(selectable_routes):
-        if route.get("course_id") == current_course_id:
-            default_index = idx
-            break
+    demo_course_id = service.DEFAULT_DEMO_COURSE_ID
+    preferred_course_id = current_course_id if current_course_id != "admin" else demo_course_id
+    default_index = _index_by_course_id(selectable_routes, preferred_course_id)
 
     labels = [f"{r['course_id']} / {r['course_name']}" for r in selectable_routes]
     selected_label = st.selectbox("시연 기준 과목", labels, index=default_index, key="course_demo_preview")

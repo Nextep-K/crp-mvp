@@ -15,6 +15,38 @@ import report_merger as RM
 import phase_a_engine as PA
 
 
+def _gap_value(gap: dict, lower_key: str, legacy_key: str):
+    return gap.get(lower_key) if lower_key in gap else gap.get(legacy_key)
+
+
+def _gap_pattern(value):
+    if value is None:
+        return "측정 불가"
+    if abs(value) <= 1.0:
+        return "일치"
+    if value > 1.0:
+        return "겸손형"
+    return "과신형"
+
+
+def _behavior_type(latest: dict, consistency):
+    if isinstance(consistency, dict):
+        return consistency.get("behavior_type")
+    qli = latest.get("QLI")
+    mti = latest.get("MTI")
+    if qli is None or mti is None:
+        return None
+    return PA.classify_4_type(float(qli), float(mti))
+
+
+def _type_verdict(ep: dict, behavior_type: str | None, consistency):
+    if isinstance(consistency, dict):
+        return consistency.get("verdict") or "판정 불가"
+    if not behavior_type:
+        return "판정 불가"
+    return "일치" if ep.get("entry_type") == behavior_type else "불일치"
+
+
 def render(conn, user_id: str, course_id: str):
     st.title("학기 종합 리포트")
     st.caption("자기보고(Phase A)와 실제 행동(Phase B) 비교 — 합산이 아닌 대조입니다.")
@@ -31,9 +63,11 @@ def render(conn, user_id: str, course_id: str):
         return
 
     report = RM.generate_final_report(ep, metrics_history)
-    gap = report["comparison"]["self_vs_behavior_gap"]
-    consistency = report["comparison"]["type_consistency"]
+    gap = report.get("comparison", {}).get("self_vs_behavior_gap", {})
+    consistency = report.get("comparison", {}).get("type_consistency", {})
     latest = metrics_history[-1]
+    behavior_type = _behavior_type(latest, consistency)
+    verdict = _type_verdict(ep, behavior_type, consistency)
 
     # ── Phase A ──────────────────────────────────────────────────────
     st.subheader("Phase A — 자기 인식 (학기 초 진단)")
@@ -56,7 +90,7 @@ def render(conn, user_id: str, course_id: str):
     c3, c4, c5 = st.columns(3)
     c3.metric("최근 MTI", f"{latest.get('MTI', '-')}")
     c4.metric("최근 QLI", f"{latest.get('QLI', '-')}")
-    c5.metric("행동 유형", consistency["behavior_type"] or "판정 불가")
+    c5.metric("행동 유형", behavior_type or "판정 불가")
 
     st.divider()
 
@@ -64,24 +98,29 @@ def render(conn, user_id: str, course_id: str):
     st.subheader("자기 인식 vs 실제 행동 비교")
     st.caption("gap = 행동 측정값 − 자기보고값. 결합·합산이 아닙니다.")
     g1, g2 = st.columns(2)
-    qli_gap = gap["qli_gap"]
-    mti_gap = gap["mti_gap"]
+    qli_gap = _gap_value(gap, "qli_gap", "QLI")
+    mti_gap = _gap_value(gap, "mti_gap", "MTI")
+    qli_pattern = gap.get("qli_pattern") or _gap_pattern(qli_gap)
+    mti_pattern = gap.get("mti_pattern") or _gap_pattern(mti_gap)
     g1.metric("QLI gap", f"{qli_gap:+.2f}" if qli_gap is not None else "-",
-              delta=gap["qli_pattern"])
+              delta=qli_pattern)
     g2.metric("MTI gap", f"{mti_gap:+.2f}" if mti_gap is not None else "-",
-              delta=gap["mti_pattern"])
+              delta=mti_pattern)
 
-    type_v = consistency["verdict"]
-    if type_v == "일치":
-        st.success(f"✅ 유형 일치: 자기 인식과 행동이 정합합니다 ({consistency['phase_a_type']})")
-    elif type_v == "불일치":
-        st.warning(f"⚠️ 유형 불일치: 자기 인식({consistency['phase_a_type']}) ≠ "
-                   f"행동({consistency['behavior_type']}). 교수 면담을 권장합니다.")
+    if verdict == "일치":
+        st.success(f"유형 일치: 자기 인식과 행동이 정합합니다 ({ep['entry_type']})")
+    elif verdict == "불일치":
+        st.warning(f"유형 불일치: 자기 인식({ep['entry_type']}) ≠ "
+                   f"행동({behavior_type or '판정 불가'}). 교수 면담을 권장합니다.")
+    else:
+        st.info("유형 일치 여부는 아직 판정할 수 없습니다.")
 
     _gap_guidance = {
         "일치": "자기 인식과 실제 행동이 일치합니다. 메타인지적 자기 이해가 정확합니다.",
         "겸손형": "실제 역량이 자기 평가보다 높습니다. 자신감을 가져도 좋습니다.",
         "과신형": "자기 평가가 실제 행동보다 높습니다. 행동 증거를 다시 살펴보세요.",
     }
-    if gap["qli_pattern"] in _gap_guidance:
-        st.info(f"**QLI**: {_gap_guidance[gap['qli_pattern']]}")
+    if qli_pattern in _gap_guidance:
+        st.info(f"**QLI**: {_gap_guidance[qli_pattern]}")
+    if mti_pattern in _gap_guidance:
+        st.info(f"**MTI**: {_gap_guidance[mti_pattern]}")

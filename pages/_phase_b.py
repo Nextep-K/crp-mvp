@@ -8,20 +8,38 @@ PBL 과제 기반 학습자-AI 대화 세션.
 튜터 AI: 직접 답변 제공 금지. 생각을 유도하는 질문 위주.
 """
 from __future__ import annotations
-import json, os, sys, uuid
+
+import json
+import os
+import sys
+import uuid
 from datetime import datetime, timezone
+
+import streamlit as st
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "engines"))
 
-import streamlit as st
 import db
 from features.course_routing import repository as course_routing_repo
 
 # Phase A 없이 Phase B 접근 방지
 # 튜터 AI 시스템 프롬프트 (CRP 측정 AI와 별개 — 학습 대화용)
-_TUTOR_SYSTEM = """당신은 학습자의 사고를 돕는 AI 튜터입니다. 직접적인 답을 제공하지 않고, 
-학습자가 스스로 탐구하도록 생각을 유도하는 질문을 합니다. 
-학습자의 가정과 전제를 부드럽게 도전하고, 다양한 관점을 고려하도록 격려하세요."""
+_TUTOR_SYSTEM = """당신은 학습자의 사고를 돕는 AI 튜터입니다.
+
+역할:
+- 정답을 직접 제공하지 말고, 학습자가 자신의 판단 기준과 전제를 스스로 점검하도록 돕습니다.
+- 학습자의 답변을 짧게 받아준 뒤, 가장 중요한 판단 기준 하나를 짚어 줍니다.
+- 대화는 넓게 흩뜨리지 말고 한 지점을 깊게 파고듭니다.
+
+응답 규칙:
+1. 후속 질문은 기본 1개만 제시합니다.
+2. 꼭 필요한 경우에도 후속 질문은 최대 2개까지만 허용합니다.
+3. 3개 이상의 질문, 번호형 질문 목록, 서로 다른 방향의 질문 다발은 금지합니다.
+4. 질문이 2개일 때는 두 질문이 같은 논점을 더 깊게 보기 위한 밀접한 질문이어야 합니다.
+5. 응답은 3~5문장 안에서 간결하게 작성합니다.
+6. 학생이 바로 무엇에 답해야 하는지 명확해야 합니다.
+"""
 
 
 def _select_task(conn, course_id: str) -> dict | None:
@@ -42,10 +60,20 @@ def _get_client():
     """Anthropic 클라이언트. API 키 없으면 None."""
     try:
         from engines.phase_b_engine.llm_client import AnthropicClient
+
         key = st.secrets.get("ANTHROPIC_API_KEY", "")
         return AnthropicClient(key) if key else None
     except Exception:
         return None
+
+
+def _limit_followup_questions(text: str, max_questions: int = 2) -> str:
+    """시연 UX 안전장치: 응답 내 물음표 기준 후속 질문 수를 제한한다."""
+    cleaned = (text or "").strip()
+    question_marks = [idx for idx, ch in enumerate(cleaned) if ch in {"?", "？"}]
+    if len(question_marks) <= max_questions:
+        return cleaned
+    return cleaned[: question_marks[max_questions - 1] + 1].strip()
 
 
 def _ai_respond(messages: list[dict], task_context: str) -> str:
@@ -56,20 +84,27 @@ def _ai_respond(messages: list[dict], task_context: str) -> str:
     try:
         import anthropic
         from engines.phase_b_engine import prompts as P
+
         aclient = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
         system = _TUTOR_SYSTEM + f"\n\n현재 과제:\n{task_context}"
-        api_msgs = [{"role": m["role"], "content": m["content"]}
-                    for m in messages if m["role"] in ("user", "assistant")]
+        api_msgs = [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+            if m["role"] in ("user", "assistant")
+        ]
         resp = aclient.messages.create(
-            model=P.CALL_POLICY["model"], max_tokens=800,
-            system=system, messages=api_msgs, temperature=0.7)
-        return resp.content[0].text
+            model=P.CALL_POLICY["model"],
+            max_tokens=500,
+            system=system,
+            messages=api_msgs,
+            temperature=0.4,
+        )
+        return _limit_followup_questions(resp.content[0].text)
     except Exception as e:
         return f"(AI 응답 오류: {e})"
 
 
-def _end_session(conn, user_id, course_id, session_id,
-                 messages, task_id, session_start, dept, grade):
+def _end_session(conn, user_id, course_id, session_id, messages, task_id, session_start, dept, grade):
     """세션 종료 처리: raw log 저장 → 큐 추가 → status 업데이트."""
     session_end = datetime.now(timezone.utc).isoformat()
     raw_log = {
@@ -83,19 +118,27 @@ def _end_session(conn, user_id, course_id, session_id,
         "student_grade": grade,
         "session_number": _count_sessions(conn, user_id, course_id) + 1,
         "messages": [
-            {"turn_id": i+1, "speaker": "student" if m["role"]=="user" else "ai",
-             "text": m["content"], "timestamp": session_start}
+            {
+                "turn_id": i + 1,
+                "question_index": m.get("q_idx"),
+                "speaker": "student" if m["role"] == "user" else "ai",
+                "text": m["content"],
+                "timestamp": session_start,
+            }
             for i, m in enumerate(messages)
         ],
     }
     import hashlib
-    raw_hash = "sha256:" + hashlib.sha256(
-        json.dumps(raw_log, ensure_ascii=False).encode()).hexdigest()
+
+    raw_hash = "sha256:" + hashlib.sha256(json.dumps(raw_log, ensure_ascii=False).encode()).hexdigest()
     # session_compressed에 raw log 저장 (B1이 처리할 원본)
-    conn.execute("""
+    conn.execute(
+        """
         INSERT OR REPLACE INTO session_compressed(session_id, compressed_json, raw_log_hash)
         VALUES(?,?,?)
-    """, (session_id, json.dumps(raw_log, ensure_ascii=False), raw_hash))
+    """,
+        (session_id, json.dumps(raw_log, ensure_ascii=False), raw_hash),
+    )
     conn.commit()
     db.update_session_status(conn, session_id, "pending_measure", session_end=session_end)
     db.push_measure_queue(conn, session_id)
@@ -104,8 +147,48 @@ def _end_session(conn, user_id, course_id, session_id,
 def _count_sessions(conn, student_id, course_id) -> int:
     row = conn.execute(
         "SELECT COUNT(*) FROM sessions WHERE student_id=? AND course_id=? AND phase='B'",
-        (student_id, course_id)).fetchone()
+        (student_id, course_id),
+    ).fetchone()
     return row[0] if row else 0
+
+
+def _messages_for_question(messages: list[dict], q_idx: int) -> list[dict]:
+    """현재 문항 메시지만 표시한다. 구버전 메시지는 0번 문항으로 간주한다."""
+    return [m for m in messages if int(m.get("q_idx", 0)) == q_idx]
+
+
+def _has_exchange(messages: list[dict], q_idx: int) -> bool:
+    q_messages = _messages_for_question(messages, q_idx)
+    has_user = any(m["role"] == "user" for m in q_messages)
+    has_assistant = any(m["role"] == "assistant" for m in q_messages)
+    return has_user and has_assistant
+
+
+def _render_question_header(question: str, q_idx: int, n_q: int) -> None:
+    st.markdown(f"### 현재 문항: {q_idx + 1} / {n_q}")
+    st.info(question)
+    st.caption("이 문항에서는 정답보다 판단 기준, 전제, 책임의 근거를 스스로 구성하는 과정이 중요합니다.")
+
+
+def _render_messages(messages: list[dict]) -> None:
+    for msg in messages:
+        with st.chat_message("user" if msg["role"] == "user" else "assistant"):
+            st.write(msg["content"])
+
+
+def _render_previous_questions(task: dict, messages: list[dict], current_q: int) -> None:
+    if current_q <= 0:
+        return
+
+    with st.expander("이전 문항 대화 보기", expanded=False):
+        for prev_idx in range(current_q):
+            prev_messages = _messages_for_question(messages, prev_idx)
+            if not prev_messages:
+                continue
+            st.markdown(f"#### 과제 {prev_idx + 1}/{len(task['questions'])}")
+            st.caption(task["questions"][prev_idx])
+            _render_messages(prev_messages)
+            st.divider()
 
 
 def render(conn, user_id: str, course_id: str):
@@ -133,67 +216,92 @@ def render(conn, user_id: str, course_id: str):
         st.session_state["chat_messages"] = []
         st.session_state["current_q"] = 0
         st.session_state["session_ended"] = False
-        db.save_session(conn, {
-            "session_id": st.session_state["session_id"],
-            "student_id": user_id, "course_id": course_id,
-            "task_id": task["task_id"], "phase": "B",
-            "status": "active",
-            "session_start": st.session_state["session_start"],
-        })
+        db.save_session(
+            conn,
+            {
+                "session_id": st.session_state["session_id"],
+                "student_id": user_id,
+                "course_id": course_id,
+                "task_id": task["task_id"],
+                "phase": "B",
+                "status": "active",
+                "session_start": st.session_state["session_start"],
+            },
+        )
         st.session_state["current_task_snapshot"] = task
         db.save_session_task_snapshot(conn, st.session_state["session_id"], user_id, course_id, task)
 
     if st.session_state.get("session_ended"):
         st.success("✅ 세션이 종료되었습니다. 측정이 진행 중입니다. 결과는 다음 접속 시 확인됩니다.")
         if st.button("새 세션 시작"):
-            for k in ["session_id", "session_start", "chat_messages",
-                      "current_q", "session_ended", "current_task_snapshot"]:
+            for k in [
+                "session_id",
+                "session_start",
+                "chat_messages",
+                "current_q",
+                "session_ended",
+                "current_task_snapshot",
+            ]:
                 st.session_state.pop(k, None)
             st.rerun()
         return
+
     q_idx = st.session_state["current_q"]
-    with st.expander(f"📋 과제 [{q_idx+1}/{n_q}]", expanded=True):
-        st.write(task["questions"][q_idx])
+    messages = st.session_state["chat_messages"]
+    current_messages = _messages_for_question(messages, q_idx)
 
-    # 채팅 표시
-    for msg in st.session_state["chat_messages"]:
-        with st.chat_message("user" if msg["role"]=="user" else "assistant"):
-            st.write(msg["content"])
+    _render_question_header(task["questions"][q_idx], q_idx, n_q)
+    st.divider()
 
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        user_input = st.chat_input("AI에게 질문하거나 생각을 입력하세요")
-    with col2:
-        if q_idx < n_q - 1 and st.button("다음 문항 →"):
+    _render_messages(current_messages)
+
+    can_advance = q_idx < n_q - 1 and _has_exchange(messages, q_idx)
+    can_submit = q_idx == n_q - 1 and _has_exchange(messages, q_idx)
+
+    if q_idx < n_q - 1:
+        if st.button("다음 문항으로 이동 →", disabled=not can_advance, type="secondary"):
             st.session_state["current_q"] += 1
             st.rerun()
+        if not can_advance:
+            st.caption("현재 문항에서 학생 답변 1회와 AI 응답 1회가 있어야 다음 문항으로 이동할 수 있습니다.")
+    else:
+        st.success("마지막 문항입니다. 답변을 완료한 뒤 세션을 제출하세요.")
+
+    user_input = st.chat_input(
+        "AI에게 질문하거나 생각을 입력하세요",
+        key=f"phase_b_chat_input_{st.session_state['session_id']}_{q_idx}",
+    )
 
     if user_input:
-        st.session_state["chat_messages"].append(
-            {"role": "user", "content": user_input})
+        st.session_state["chat_messages"].append({"role": "user", "content": user_input, "q_idx": q_idx})
         with st.chat_message("user"):
             st.write(user_input)
         with st.chat_message("assistant"):
             with st.spinner(""):
-                reply = _ai_respond(
-                    st.session_state["chat_messages"],
-                    task["questions"][q_idx])
+                reply = _ai_respond(_messages_for_question(st.session_state["chat_messages"], q_idx), task["questions"][q_idx])
             st.write(reply)
-        st.session_state["chat_messages"].append(
-            {"role": "assistant", "content": reply})
+        st.session_state["chat_messages"].append({"role": "assistant", "content": reply, "q_idx": q_idx})
         st.rerun()
 
     st.divider()
-    if st.button("🔚 세션 종료 및 제출", type="primary"):
-        if len(st.session_state["chat_messages"]) < 2:
-            st.warning("AI와 최소 한 번 이상 대화 후 세션을 종료하세요.")
-        else:
+    _render_previous_questions(task, messages, q_idx)
+
+    if q_idx == n_q - 1:
+        if st.button("🔚 세션 종료 및 제출", type="primary", disabled=not can_submit):
             _end_session(
-                conn, user_id, course_id,
+                conn,
+                user_id,
+                course_id,
                 st.session_state["session_id"],
                 st.session_state["chat_messages"],
                 task["task_id"],
                 st.session_state["session_start"],
-                dept=course_id, grade=2)
+                dept=course_id,
+                grade=2,
+            )
             st.session_state["session_ended"] = True
             st.rerun()
+        if not can_submit:
+            st.caption("마지막 문항에서 학생 답변 1회와 AI 응답 1회가 있어야 제출할 수 있습니다.")
+    else:
+        st.caption("모든 문항을 순서대로 진행한 뒤 마지막 문항에서 세션을 제출할 수 있습니다.")

@@ -11,6 +11,7 @@ import streamlit as st
 
 import db
 from features.course_routing import repository as course_repository
+from features.course_routing import service as course_service
 from pages._question_pool import _render_phase_a, _render_phase_b
 
 
@@ -24,6 +25,15 @@ def _active_label(value) -> str:
 
 def _task_label(task: dict) -> str:
     return f"{task['task_id']} — {task['title']}"
+
+
+def _index_by_course_id(courses: list[dict], course_id: str | None) -> int:
+    if not course_id:
+        return 0
+    for idx, course in enumerate(courses):
+        if course.get("course_id") == course_id:
+            return idx
+    return 0
 
 
 def _render_phase_a_current_preview(conn) -> None:
@@ -90,16 +100,18 @@ def _select_phase_b_course(conn) -> dict | None:
         st.error("등록된 과목이 없습니다. 먼저 과목 관리에서 과목을 등록하세요.")
         return None
 
-    course_options = {
-        f"{c['course_id']} — {c['course_name']} ({_active_label(c.get('active'))})": c
+    default_index = _index_by_course_id(courses, course_service.DEFAULT_DEMO_COURSE_ID)
+    labels = [
+        f"{c['course_id']} — {c['course_name']} ({_active_label(c.get('active'))})"
         for c in courses
-    }
+    ]
     selected_label = st.selectbox(
         "시연 과목 선택",
-        list(course_options.keys()),
+        labels,
+        index=default_index,
         key="phase_b_demo_course",
     )
-    return course_options[selected_label]
+    return courses[labels.index(selected_label)]
 
 
 def _render_phase_b_current_preview(conn, selected_course: dict) -> None:

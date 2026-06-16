@@ -191,6 +191,25 @@ def _render_previous_questions(task: dict, messages: list[dict], current_q: int)
             st.divider()
 
 
+def _render_answer_form(session_id: str, q_idx: int, current_messages: list[dict]) -> tuple[bool, str]:
+    """현재 위치에 답변 입력창을 렌더링한다.
+
+    st.chat_input은 화면 최하단에 고정되므로, 시연 UX에서는 text_area 기반 입력창을 사용한다.
+    답변창은 현재 문항 대화 바로 아래, 다음 문항 이동 버튼 바로 위에 위치한다.
+    """
+    st.markdown("#### 답변 입력")
+    form_key = f"phase_b_answer_form_{session_id}_{q_idx}_{len(current_messages)}"
+    with st.form(form_key, clear_on_submit=True):
+        user_input = st.text_area(
+            "AI에게 질문하거나 생각을 입력하세요",
+            placeholder="AI에게 질문하거나 생각을 입력하세요",
+            height=120,
+            label_visibility="collapsed",
+        )
+        submitted = st.form_submit_button("AI에게 답변 보내기", type="primary")
+    return submitted, user_input.strip()
+
+
 def render(conn, user_id: str, course_id: str):
     st.title("Phase B — PBL 세션")
 
@@ -255,6 +274,20 @@ def render(conn, user_id: str, course_id: str):
 
     _render_messages(current_messages)
 
+    submitted, user_input = _render_answer_form(st.session_state["session_id"], q_idx, current_messages)
+    if submitted:
+        if not user_input:
+            st.warning("답변을 입력한 뒤 전송하세요.")
+            return
+        st.session_state["chat_messages"].append({"role": "user", "content": user_input, "q_idx": q_idx})
+        with st.spinner("AI가 응답을 생성하는 중입니다..."):
+            reply = _ai_respond(
+                _messages_for_question(st.session_state["chat_messages"], q_idx),
+                task["questions"][q_idx],
+            )
+        st.session_state["chat_messages"].append({"role": "assistant", "content": reply, "q_idx": q_idx})
+        st.rerun()
+
     can_advance = q_idx < n_q - 1 and _has_exchange(messages, q_idx)
     can_submit = q_idx == n_q - 1 and _has_exchange(messages, q_idx)
 
@@ -266,27 +299,6 @@ def render(conn, user_id: str, course_id: str):
             st.caption("현재 문항에서 학생 답변 1회와 AI 응답 1회가 있어야 다음 문항으로 이동할 수 있습니다.")
     else:
         st.success("마지막 문항입니다. 답변을 완료한 뒤 세션을 제출하세요.")
-
-    user_input = st.chat_input(
-        "AI에게 질문하거나 생각을 입력하세요",
-        key=f"phase_b_chat_input_{st.session_state['session_id']}_{q_idx}",
-    )
-
-    if user_input:
-        st.session_state["chat_messages"].append({"role": "user", "content": user_input, "q_idx": q_idx})
-        with st.chat_message("user"):
-            st.write(user_input)
-        with st.chat_message("assistant"):
-            with st.spinner(""):
-                reply = _ai_respond(_messages_for_question(st.session_state["chat_messages"], q_idx), task["questions"][q_idx])
-            st.write(reply)
-        st.session_state["chat_messages"].append({"role": "assistant", "content": reply, "q_idx": q_idx})
-        st.rerun()
-
-    st.divider()
-    _render_previous_questions(task, messages, q_idx)
-
-    if q_idx == n_q - 1:
         if st.button("🔚 세션 종료 및 제출", type="primary", disabled=not can_submit):
             _end_session(
                 conn,
@@ -303,5 +315,9 @@ def render(conn, user_id: str, course_id: str):
             st.rerun()
         if not can_submit:
             st.caption("마지막 문항에서 학생 답변 1회와 AI 응답 1회가 있어야 제출할 수 있습니다.")
-    else:
+
+    st.divider()
+    _render_previous_questions(task, messages, q_idx)
+
+    if q_idx < n_q - 1:
         st.caption("모든 문항을 순서대로 진행한 뒤 마지막 문항에서 세션을 제출할 수 있습니다.")

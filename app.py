@@ -11,6 +11,7 @@ app.py — CRP MVP 메인 진입점 (09 §2)
 - 엔진 함수는 st.session_state를 직접 읽지 않는다.
 - v0.5.1부터 과목 라우팅은 features/course_routing 블록으로 분리한다.
 - v0.5.3부터 교수 관리자 메뉴는 Phase A 관리 / Phase B 관리로 직접 분리한다.
+- v0.5.6부터 Demo Mode quick start를 제공해 대학 시연 진입을 단순화한다.
 """
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ from features.course_routing import service as course_routing_service
 from features.course_routing.ui import render_student_selector
 
 st.set_page_config(page_title="CRP 인지 재구성 프로토콜", layout="wide")
+
+DEMO_STUDENT_ID = "demo_student_01"
 
 
 @st.cache_resource
@@ -57,6 +60,51 @@ def _clear_flow_state() -> None:
         "current_task_snapshot",
     ]:
         st.session_state.pop(key, None)
+
+
+def _start_student_session(conn, user_id: str, selected_course: dict, *, demo_mode: bool = False) -> None:
+    """Persist the student/course pair and enter the Phase A → Phase B flow."""
+    course_id = selected_course["course_id"]
+    db.upsert_student(conn, user_id)
+    db.upsert_course(
+        conn,
+        course_id,
+        name=selected_course.get("course_name", ""),
+        dept=selected_course.get("department_name", ""),
+    )
+    _clear_flow_state()
+    st.session_state.update(
+        {
+            "role": "student",
+            "user_id": user_id,
+            "course_id": course_id,
+            "course_label": selected_course.get("course_name", course_id),
+            "logged_in": True,
+            "student_flow_view": "activity",
+            "demo_mode": demo_mode,
+        }
+    )
+    st.rerun()
+
+
+def _render_student_demo_mode(conn, user_id: str) -> None:
+    """Render a one-click demo entry for university presentation rehearsals."""
+    default_course = course_routing_service.get_default_course(conn)
+    if not default_course:
+        st.warning("Demo Mode를 사용할 기본 활성 과목이 없습니다. 과목 관리에서 기본 과목을 활성화하세요.")
+        return
+
+    st.markdown("### Demo Mode")
+    st.caption("대학 시연용 빠른 시작입니다. 별도 설정 없이 기본 학생 ID와 기본 시연 과목으로 바로 진입합니다.")
+    st.write(
+        f"**기본 학생 ID:** `{DEMO_STUDENT_ID}`  ·  "
+        f"**기본 과목:** `{default_course['course_id']}` — {default_course.get('course_name', '')}"
+    )
+
+    demo_user_id = (user_id or "").strip() or DEMO_STUDENT_ID
+    if st.button("Demo Mode로 학생 시연 바로 시작", type="secondary", use_container_width=True):
+        _start_student_session(conn, demo_user_id, default_course, demo_mode=True)
+
 
 
 def _admin_phase_a_fallback(conn, prof_id: str, course_id: str) -> None:
@@ -127,6 +175,10 @@ def login_page():
     else:
         st.info(privacy_notice())
         conn = get_db()
+
+        _render_student_demo_mode(conn, user_id)
+        st.divider()
+
         selected_course = render_student_selector(conn)
         if st.button("로그인", type="primary"):
             if not user_id:
@@ -134,26 +186,7 @@ def login_page():
             elif not selected_course:
                 st.error("과목을 선택하세요.")
             else:
-                course_id = selected_course["course_id"]
-                db.upsert_student(conn, user_id)
-                db.upsert_course(
-                    conn,
-                    course_id,
-                    name=selected_course.get("course_name", ""),
-                    dept=selected_course.get("department_name", ""),
-                )
-                _clear_flow_state()
-                st.session_state.update(
-                    {
-                        "role": "student",
-                        "user_id": user_id,
-                        "course_id": course_id,
-                        "course_label": selected_course.get("course_name", course_id),
-                        "logged_in": True,
-                        "student_flow_view": "activity",
-                    }
-                )
-                st.rerun()
+                _start_student_session(conn, user_id, selected_course, demo_mode=False)
 
 
 def main():
@@ -167,6 +200,8 @@ def main():
     with st.sidebar:
         st.write(f"**{st.session_state['user_id']}** ({role})")
         st.caption(f"과목: {st.session_state['course_id']}")
+        if st.session_state.get("demo_mode"):
+            st.caption("Demo Mode")
         if st.button("로그아웃"):
             for k in list(st.session_state.keys()):
                 del st.session_state[k]
